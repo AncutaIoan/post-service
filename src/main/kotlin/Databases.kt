@@ -10,65 +10,70 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.r2dbc.spi.Connection
 import io.r2dbc.spi.ConnectionFactories
-import io.r2dbc.spi.ConnectionFactoryOptions
 import io.r2dbc.spi.ConnectionFactoryOptions.*
+import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingle
 import reactor.core.publisher.Mono
 
 fun Application.configureDatabases() {
-    val dbConnectionMono: Mono<Connection> = connectToPostgresReactive()
-
     routing {
         // Create city
         post("/cities") {
             val city = call.receive<City>()
-            dbConnectionMono.map { connection ->
+            val connection = connectToPostgresReactive().awaitSingle()
+            try {
                 val cityService = CityService(connection)
-                cityService.create(city)
-            }.subscribe { id ->
+                val id = cityService.create(city)
                 call.respond(HttpStatusCode.Created, id)
+            } finally {
+                connection.close().awaitSingle()
             }
         }
 
         // Read city
         get("/cities/{id}") {
-            val id = call.parameters["id"]?.toInt() ?: throw IllegalArgumentException("Invalid ID")
-            dbConnectionMono.flatMap { connection ->
+            val id = call.parameters["id"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest, "Invalid ID")
+            val connection = connectToPostgresReactive().awaitSingle()
+            try {
                 val cityService = CityService(connection)
-                cityService.read(id)
-                    .doOnTerminate { connection.close() }
-            }.subscribe({ city ->
+                val city = cityService.read(id)
                 call.respond(HttpStatusCode.OK, city)
-            }, { e ->
+            } catch (e: Exception) {
                 call.respond(HttpStatusCode.NotFound)
-            })
+            } finally {
+                connection.close().awaitSingle()
+            }
         }
 
         // Update city
         put("/cities/{id}") {
-            val id = call.parameters["id"]?.toInt() ?: throw IllegalArgumentException("Invalid ID")
-            val user = call.receive<City>()
-            dbConnectionMono.flatMap { connection ->
+            val id = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ID")
+            val city = call.receive<City>()
+            val connection = connectToPostgresReactive().awaitSingle()
+            try {
                 val cityService = CityService(connection)
-                cityService.update(id, user)
-                    .doOnTerminate { connection.close() }
-            }.subscribe {
+                cityService.update(id, city)
                 call.respond(HttpStatusCode.OK)
+            } finally {
+                connection.close().awaitSingle()
             }
         }
 
         // Delete city
         delete("/cities/{id}") {
-            val id = call.parameters["id"]?.toInt() ?: throw IllegalArgumentException("Invalid ID")
-            dbConnectionMono.flatMap { connection ->
+            val id = call.parameters["id"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid ID")
+            val connection = connectToPostgresReactive().awaitSingle()
+            try {
                 val cityService = CityService(connection)
                 cityService.delete(id)
-                    .doOnTerminate { connection.close() }
-            }.subscribe {
                 call.respond(HttpStatusCode.OK)
+            } finally {
+                connection.close().awaitSingle()
             }
         }
     }
 }
+
 
 /**
  * Makes a connection to a Postgres database.
@@ -95,22 +100,6 @@ fun Application.configureDatabases() {
 
 fun Application.connectToPostgresReactive(): Mono<Connection> {
     val url = environment.config.property("r2dbc.url").getString()
-    val user = environment.config.property("r2dbc.username").getString()
-    val password = environment.config.property("r2dbc.password").getString()
-
-    // Use the ConnectionFactoryOptions builder with the correct option keys.
-    val connectionFactoryOptions = ConnectionFactoryOptions.builder()
-        .option(ConnectionFactoryOptions.DRIVER, "postgresql") // specify the driver
-        .option(ConnectionFactoryOptions.PROTOCOL, "postgresql") // specify the protocol
-        .option(ConnectionFactoryOptions.HOST, "localhost") // Host where your db is running
-        .option(ConnectionFactoryOptions.PORT, 5432) // Default PostgreSQL port
-        .option(ConnectionFactoryOptions.USER, user) // Database username
-        .option(ConnectionFactoryOptions.PASSWORD, password) // Database password
-        .option(ConnectionFactoryOptions.DATABASE, "postgres") // Database name
-        .build()
-
-    val connectionFactory = ConnectionFactories.get(connectionFactoryOptions)
-
-    // Return a Mono<Connection> representing the async connection creation
-    return connectionFactory.create()
+    val connectionFactory = ConnectionFactories.get(url)
+    return Mono.from(connectionFactory.create())
 }

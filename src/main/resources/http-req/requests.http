@@ -1,0 +1,8 @@
+### Create a City
+POST http://localhost:8080/cities
+Content-Type: application/json
+
+{
+  "name": "Springfield",
+  "population": 150000
+}

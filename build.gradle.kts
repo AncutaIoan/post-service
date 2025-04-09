@@ -30,6 +30,7 @@ dependencies {
     implementation(libs.ktor.server.config.yaml)
     implementation(libs.r2dbc.postgresql)
     implementation(libs.r2dbc.spi)
+    implementation(libs.kotlinx.coroutines.reactor)
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.kotlin.test.junit)
 
